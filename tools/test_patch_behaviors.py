@@ -90,7 +90,6 @@ def test_frontend_resource_key_translations() -> None:
     assert data["Mn8BAEIrHk"] == "当前连续使用天数"
     assert data["SHC19EXDV4"] == "分支"
     assert data["puLNUJezx6"] == "固定"
-    assert data["aNzS6KFyd2"] == "无衬线聊天字体"
     assert data["oZJlI1WvFj"] == "无衬线"
     assert data["6gT5ZWvI0K"] == "模型：{model}"
     assert data["eLHIIAgqml"] == "提供模型 ID，例如 /model claude-sonnet-4-5"

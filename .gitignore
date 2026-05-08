@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+*.pyo
+.claude/
+
+# Translation work-in-progress files
+resources/missing_*.json
+resources/remaining_*.json
+resources/final_batch_*.json
+resources/untranslated*.json
+resources/all_untranslated.json
+resources/all_remaining.txt
+resources/python_dict_lines.txt
+resources/to_translate.json
+resources/need_translate.json
+resources/remaining2.json
+resources/remaining_final.json
+resources/translated_remaining_3.json
+resources/frontend-zh-CN-merged.json
+
+# Tool work-in-progress files
+tools/_new_keys.json
+tools/_untranslated.json
+tools/_untranslated_sample.txt
+
+# Translation helper scripts (not part of mainline)
+apply_translations.py
+apply_all_translations.py

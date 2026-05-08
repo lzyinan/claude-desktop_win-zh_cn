@@ -25,16 +25,30 @@ ROOT = Path(__file__).resolve().parent
 RESOURCES = ROOT / "resources"
 BACKUP_ROOT = Path(os.environ["LOCALAPPDATA"]) / "Claude-zh-CN-official-backup" / "json-only"
 CONFIG_PATH = Path(os.environ["APPDATA"]) / "Claude-3p" / "config.json"
+_CONFIG_ALT = Path(os.environ["APPDATA"]) / "Claude" / "config.json"
+if not CONFIG_PATH.exists() and _CONFIG_ALT.exists():
+    CONFIG_PATH = _CONFIG_ALT
 
 
 def find_claude_package() -> Path | None:
-    """Auto-detect Claude package under WindowsApps."""
+    """Auto-detect Claude package — supports both Squirrel and WindowsApps installs."""
+    # 1. Squirrel installer (AnthropicClaude in LocalAppData)
+    squirrel_base = Path(os.environ.get("LOCALAPPDATA", "")) / "AnthropicClaude"
+    if squirrel_base.exists():
+        # Newer Squirrel versions: resources directly under app-*/
+        candidates = sorted(squirrel_base.glob("app-*/resources/en-US.json"), reverse=True)
+        if candidates:
+            return candidates[0].parent.parent  # .../app-X.Y.Z
+        # Older Squirrel versions: extra app/ subdirectory
+        candidates = sorted(squirrel_base.glob("app-*/app/resources/en-US.json"), reverse=True)
+        if candidates:
+            return candidates[0].parent.parent  # .../app
+    # 2. Windows Store / MSIX (WindowsApps)
     base = Path(r"C:\Program Files\WindowsApps")
-    if not base.exists():
-        return None
-    candidates = sorted(base.glob("Claude_*_x64__*/app/resources/en-US.json"), reverse=True)
-    if candidates:
-        return candidates[0].parent.parent  # .../app
+    if base.exists():
+        candidates = sorted(base.glob("Claude_*_x64__*/app/resources/en-US.json"), reverse=True)
+        if candidates:
+            return candidates[0].parent.parent  # .../app
     return None
 
 
@@ -91,14 +105,16 @@ def write_text_best_effort(path: Path, text: str, *, context: str) -> bool:
         return False
 
 
-def patch_whitelist(app_resources: Path) -> str | None:
-    """Add zh-CN to the language whitelist. Uses flexible matching."""
+def patch_whitelist(app_resources: Path) -> list[str]:
+    """Add zh-CN to the language whitelist in ALL matching bundles."""
     assets_dir = app_resources / "ion-dist" / "assets" / "v1"
     candidates = sorted(assets_dir.glob("index-*.js"))
     if not candidates:
         print("Warning: no index-*.js found; skipping whitelist patch")
-        return None
+        return []
 
+    pattern = re.compile(r'(\["en-US"(?:,"[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,4})*")+)\]')
+    patched = []
     for path in candidates:
         text = path.read_text(encoding="utf-8")
 
@@ -106,21 +122,20 @@ def patch_whitelist(app_resources: Path) -> str | None:
         backup_file(path, app_resources)
 
         if '"zh-CN"' in text:
-            return path.name  # already present
+            patched.append(path.name + " (already)")
+            continue
 
-        # Flexible match: find a JSON array starting with "en-US" that looks like a locale whitelist
-        pattern = re.compile(r'(\["en-US"(?:,"[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,4})*")+)\]')
         m = pattern.search(text)
         if m:
-            original_array = m.group(0)  # e.g. ["en-US","de-DE",...]
-            # Insert zh-CN before the closing bracket
+            original_array = m.group(0)
             patched_array = original_array[:-1] + ',"zh-CN"]'
             text = text.replace(original_array, patched_array, 1)
             if write_text_best_effort(path, text, context="whitelist patch"):
-                return path.name
+                patched.append(path.name)
 
-    print("Warning: whitelist pattern not found in any index bundle")
-    return None
+    if not patched:
+        print("Warning: whitelist pattern not found in any index bundle")
+    return patched
 
 
 def set_locale() -> bool:
@@ -154,6 +169,14 @@ def main() -> int:
 
     if args.app_dir:
         app_dir = Path(args.app_dir)
+        # If user pointed at the AnthropicClaude root, auto-find latest app-*/ subdirectory
+        if not (app_dir / "resources").exists():
+            candidates = sorted(app_dir.glob("app-*/resources/en-US.json"), reverse=True)
+            if candidates:
+                app_dir = candidates[0].parent.parent
+                print(f"Auto-detected app version: {app_dir.name}")
+            else:
+                raise SystemExit(f"No app-*/resources/en-US.json found under {app_dir}")
     else:
         app_dir = find_claude_package()
 
@@ -184,7 +207,7 @@ def main() -> int:
         copied += 1
 
     # Step 2: Patch whitelist
-    wl_file = patch_whitelist(app_resources)
+    wl_files = patch_whitelist(app_resources)
 
     # Step 3: Set locale
     locale_set = set_locale()
@@ -192,7 +215,7 @@ def main() -> int:
     print("Done")
     print(f"App dir: {app_dir}")
     print(f"Copied json resources: {copied}")
-    print(f"Whitelist patched: {wl_file or 'skipped'}")
+    print(f"Whitelist patched: {', '.join(wl_files) if wl_files else 'skipped'}")
     print(f"Locale set: {locale_set}")
     print(f"Backup root: {BACKUP_ROOT}")
     return 0

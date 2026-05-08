@@ -636,6 +636,44 @@ Claude Desktop 更新后资源结构可能变化，若补丁失败，请先更�
 | `tools/check_i18n_coverage.py` | 检测疑似未翻译条目 |
 | `tools/test_patch_behaviors.py` | 无需管理员权限的主线回归测试（字体注入 / 安装 / 恢复 / 关键文案） |
 
+## 本 Fork 相对上游的改动
+
+本仓库 fork 自 [Jyy1529/claude-desktop_win-zh_cn](https://github.com/Jyy1529/claude-desktop_win-zh_cn)，在原项目基础上做了以下增强：
+
+### 1. 新增 Squirrel 安装器路径支持
+
+所有 Python 补丁脚本和 PowerShell 脚本扩展了对 `%LOCALAPPDATA%\AnthropicClaude` 安装路径的自动检测，不再仅限于 Windows Store / MSIX 安装方式。同时支持用户直接指定 AnthropicClaude 根目录，脚本会自动向下搜索 `app-*/resources/` 子目录。
+
+- `patch_windowsapps_json_only.py` — `find_claude_package()` 新增 Squirrel 路径搜索
+- `patch_chunks_zh_cn.py` — 同上
+- `restore_claude_zh_cn_windowsapps.py` — 同上
+- `claude-zh-cn.ps1` — `Find-ClaudePackage` 新增 Squirrel 路径，WindowsApps 降为第二优先级
+
+### 2. 备选配置路径
+
+当 `%APPDATA%\Claude-3p\config.json` 不存在时，自动回退到 `%APPDATA%\Claude\config.json`，兼容两种安装方式的配置目录。
+
+### 3. JS Chunk 补丁 glob 模式化
+
+`patch_chunks_zh_cn.py` 中的 `PATCHES` 字典键名从精确文件名（如 `cbc59a8af-DbOQVv5S.js`）改为 glob 模式（如 `cbc59a8af-*.js`），提升对不同 Claude 版本的兼容性，减少每次更新都需要修改文件名的维护成本。
+
+### 4. 前端翻译大幅扩展
+
+`resources/frontend-zh-CN.json` 在原 12,326 条的基础上新增了约 1,184 个翻译条目（净增 894 条），覆盖新版 Claude Desktop 的更多 UI 文本，包括：
+
+- 登录界面（Sign in → 登录）
+- 会话管理（Tasks → 任务、Chats → 聊天）
+- Mermaid 图表、项目移动等新功能标签
+- Google Drive 云环境相关标题
+- 3P 设置页 AWS / Azure / GCP / Bedrock / Vertex 相关配置标签
+- 侧边栏导航精简为 4 条核心翻译（Chat → 聊天、Cowork → 协作、Code → 代码、Operon → 自定义）
+
+### 5. 白名单补丁增强
+
+`patch_windowsapps_json_only.py` 中的 `patch_whitelist()` 返回类型从单个文件名改为文件列表，支持同时处理多个 index bundle 文件。
+
+---
+
 ## 致谢
 
 感谢 [LINUX DO](https://linux.do/) 社区的支持与分享。

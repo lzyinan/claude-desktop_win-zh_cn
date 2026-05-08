@@ -19,6 +19,9 @@ from pathlib import Path
 
 BACKUP_ROOT = Path(os.environ["LOCALAPPDATA"]) / "Claude-zh-CN-official-backup" / "chunks"
 CONFIG_PATH = Path(os.environ["APPDATA"]) / "Claude-3p" / "config.json"
+_CONFIG_ALT = Path(os.environ["APPDATA"]) / "Claude" / "config.json"
+if not CONFIG_PATH.exists() and _CONFIG_ALT.exists():
+    CONFIG_PATH = _CONFIG_ALT
 FONT_KEY = "claudeZhCnFont"
 
 
@@ -360,12 +363,24 @@ svg text, svg tspan {{
 
 
 def find_claude_package() -> Path | None:
+    """Auto-detect Claude package — supports both Squirrel and WindowsApps installs."""
+    # 1. Squirrel installer (AnthropicClaude in LocalAppData)
+    squirrel_base = Path(os.environ.get("LOCALAPPDATA", "")) / "AnthropicClaude"
+    if squirrel_base.exists():
+        # Newer Squirrel versions: resources directly under app-*/
+        candidates = sorted(squirrel_base.glob("app-*/resources/en-US.json"), reverse=True)
+        if candidates:
+            return candidates[0].parent.parent  # .../app-X.Y.Z
+        # Older Squirrel versions: extra app/ subdirectory
+        candidates = sorted(squirrel_base.glob("app-*/app/resources/en-US.json"), reverse=True)
+        if candidates:
+            return candidates[0].parent.parent
+    # 2. Windows Store / MSIX (WindowsApps)
     base = Path(r"C:\Program Files\WindowsApps")
-    if not base.exists():
-        return None
-    candidates = sorted(base.glob("Claude_*_x64__*/app/resources/en-US.json"), reverse=True)
-    if candidates:
-        return candidates[0].parent.parent
+    if base.exists():
+        candidates = sorted(base.glob("Claude_*_x64__*/app/resources/en-US.json"), reverse=True)
+        if candidates:
+            return candidates[0].parent.parent
     return None
 
 
@@ -490,8 +505,8 @@ def patch_font_runtime(assets_dir: Path) -> int:
 
 PATCHES: dict[str, list[tuple[str, str]]] = {}
 
-# === 3P settings page (c71860c77-DNv5VYLZ.js) ===
-PATCHES["c71860c77-DNv5VYLZ.js"] = [
+# === 3P settings page (c71860c77-*.js) — use glob pattern ===
+PATCHES["c71860c77-*.js"] = [
     ('"Egress Requirements"', '"\u51fa\u53e3\u8981\u6c42"'),
     ('"Gateway base URL"', '"\u81ea\u5b9a\u4e49 Base URL"'),
     ('"Gateway API key"', '"\u81ea\u5b9a\u4e49 API Key"'),
@@ -519,118 +534,67 @@ PATCHES["c71860c77-DNv5VYLZ.js"] = [
     ('"Telemetry & updates"', '"\u9065\u6d4b\u4e0e\u66f4\u65b0"'),
     ('"Usage limits"', '"\u4f7f\u7528\u9650\u5236"'),
     ('"Plugins & skills"', '"\u63d2\u4ef6\u4e0e\u6280\u80fd"'),
-    ('gateway:"\u81ea\u5b9a\u4e49"', 'gateway:"\u81ea\u5b9a\u4e49"'),
     ('gateway:"Gateway"', 'gateway:"\u81ea\u5b9a\u4e49"'),
+    # New 3P settings labels (v1.5220.0+)
+    ('"Allowed workspace folders"', '"允许的工作区文件夹"'),
+    ('"AWS bearer token"', '"AWS Bearer 令牌"'),
+    ('"AWS config directory"', '"AWS 配置目录"'),
+    ('"AWS profile name"', '"AWS 配置文件名称"'),
+    ('"AWS region"', '"AWS 区域"'),
+    ('"Azure AI Foundry API key"', '"Azure AI Foundry API 密钥"'),
+    ('"Azure AI Foundry resource name"', '"Azure AI Foundry 资源名称"'),
+    ('"Bedrock base URL"', '"Bedrock Base URL"'),
+    ('"Bedrock service tier"', '"Bedrock 服务层级"'),
+    ('"Bootstrap OIDC parameters"', '"引导 OIDC 参数"'),
+    ('"Bootstrap config URL"', '"引导配置 URL"'),
+    ('"Credential helper TTL"', '"凭证助手 TTL"'),
+    ('"Credential helper script"', '"凭证助手脚本"'),
+    ('"Disabled built-in tools"', '"禁用内置工具"'),
+    ('"GCP credentials file path"', '"GCP 凭证文件路径"'),
+    ('"GCP project ID"', '"GCP 项目 ID"'),
+    ('"GCP region"', '"GCP 区域"'),
+    ('"Managed MCP servers"', '"托管 MCP 服务器"'),
+    ('"Max tokens per window"', '"每窗口最大令牌数"'),
+    ('"Model list"', '"模型列表"'),
+    ('"Organization UUID"', '"组织 UUID"'),
+    ('"Token cap window"', '"令牌上限窗口"'),
+    ('"Use bootstrap config"', '"使用引导配置"'),
+    ('"Vertex AI base URL"', '"Vertex AI Base URL"'),
+    ('"Vertex OAuth client ID"', '"Vertex OAuth 客户端 ID"'),
+    ('"Vertex OAuth client secret"', '"Vertex OAuth 客户端密钥"'),
+    ('"Vertex OAuth scopes"', '"Vertex OAuth 范围"'),
+    ('"Source"', '"来源"'),
+    ('"Authorization URL"', '"授权 URL"'),
+    ('"Auto-updates"', '"自动更新"'),
+    ('"Client ID"', '"客户端 ID"'),
+    ('"Core (VM bundle + Claude CLI binary)"', '"核心（VM 包 + Claude CLI 二进制文件）"'),
+    ('"Essential telemetry"', '"基本遥测"'),
+    ('"Firewall allowlist (.txt)"', '"防火墙白名单 (.txt)"'),
+    ('"Headers"', '"请求头"'),
+    ('"Headers helper script"', '"请求头助手脚本"'),
+    ('"Helper cache TTL (sec)"', '"助手缓存 TTL（秒）"'),
+    ('"Issuer URL"', '"签发者 URL"'),
+    ('"Model ID"', '"模型 ID"'),
+    ('"Nonessential services"', '"非核心服务"'),
+    ('"Nonessential telemetry"', '"非核心遥测"'),
+    ('"Redirect port"', '"重定向端口"'),
+    ('"Scopes"', '"范围"'),
+    ('"Token URL"', '"令牌 URL"'),
+    ('"Transport"', '"传输方式"'),
+    ('"Windows registry file"', '"Windows 注册表文件"'),
+    ('"macOS configuration profile"', '"macOS 配置描述文件"'),
+    ('"Block essential telemetry"', '"阻止基本遥测"'),
+    ('"Block nonessential services"', '"阻止非核心服务"'),
+    ('"Block nonessential telemetry"', '"阻止非核心遥测"'),
+    ('"Offer 1M-context variant"', '"提供 1M 上下文变体"'),
 ]
 
-# === Sidebar navigation (cbc59a8af-DbOQVv5S.js) ===
-PATCHES["cbc59a8af-DbOQVv5S.js"] = [
-    ('label:"\u804a\u5929"', 'label:"\u804a\u5929"'),
-    ('label:"Chat"', 'label:"\u804a\u5929"'),
-    ('label:"Cowork"', 'label:"\u534f\u4f5c"'),
-    ('label:"Code"', 'label:"\u4ee3\u7801"'),
-    ('label:"Operon"', 'label:"\u5b9e\u9a8c\u5ba4"'),
-    ('label:"\u9879\u76ee"', 'label:"\u9879\u76ee"'),
-    ('label:"Projects"', 'label:"\u9879\u76ee"'),
-    ('label:"\u5df2\u5b89\u6392"', 'label:"\u5df2\u5b89\u6392"'),
-    ('label:"Scheduled"', 'label:"\u5df2\u5b89\u6392"'),
-    ('label:"Live artifacts"', 'label:"\u5b9e\u65f6 Artifacts"'),
-    ('label:"\u4efb\u52a1"', 'label:"\u4efb\u52a1"'),
-    ('label:"Tasks"', 'label:"\u4efb\u52a1"'),
-    ('label:"Pull Requests"', 'label:"\u62c9\u53d6\u8bf7\u6c42"'),
-    ('label:"\u56de\u653e"', 'label:"\u56de\u653e"'),
-    ('label:"Replay"', 'label:"\u56de\u653e"'),
-    ('label:"\u8c03\u5ea6"', 'label:"\u8c03\u5ea6"'),
-    ('label:"Dispatch"', 'label:"\u8c03\u5ea6"'),
-    ('label:"\u60f3\u6cd5"', 'label:"\u60f3\u6cd5"'),
-    ('label:"Ideas"', 'label:"\u60f3\u6cd5"'),
-    ('label:"\u5e94\u7528"', 'label:"\u5e94\u7528"'),
-    ('label:"Apps"', 'label:"\u5e94\u7528"'),
-    ('label:"\u5b89\u5168"', 'label:"\u5b89\u5168"'),
-    ('label:"Security"', 'label:"\u5b89\u5168"'),
-    ('label:"\u81ea\u5b9a\u4e49"', 'label:"\u81ea\u5b9a\u4e49"'),
-    ('label:"Customize"', 'label:"\u81ea\u5b9a\u4e49"'),
-    ('label:"\u72b6\u6001"', 'label:"\u72b6\u6001"'),
-    ('label:"Status"', 'label:"\u72b6\u6001"'),
-    ('label:"\u73af\u5883"', 'label:"\u73af\u5883"'),
-    ('label:"Environment"', 'label:"\u73af\u5883"'),
-    ('chat:"\u65b0\u5efa\u804a\u5929"', 'chat:"\u65b0\u5efa\u804a\u5929"'),
-    ('chat:"New chat"', 'chat:"\u65b0\u5efa\u804a\u5929"'),
-    ('cowork:"\u65b0\u5efa\u4efb\u52a1"', 'cowork:"\u65b0\u5efa\u4efb\u52a1"'),
-    ('cowork:"New task"', 'cowork:"\u65b0\u5efa\u4efb\u52a1"'),
-    ('code:"\u65b0\u5efa\u4f1a\u8bdd"', 'code:"\u65b0\u5efa\u4f1a\u8bdd"'),
-    ('code:"New session"', 'code:"\u65b0\u5efa\u4f1a\u8bdd"'),
-    ('operon:"\u65b0\u5efa\u4f1a\u8bdd"', 'operon:"\u65b0\u5efa\u4f1a\u8bdd"'),
-    ('operon:"New session"', 'operon:"\u65b0\u5efa\u4f1a\u8bdd"'),
-    ('oo="\u672c\u5730"', 'oo="\u672c\u5730"'),
-    ('oo="Local"', 'oo="\u672c\u5730"'),
-    ('io="\u4e91\u7aef"', 'io="\u4e91\u7aef"'),
-    ('io="Cloud"', 'io="\u4e91\u7aef"'),
-    ('ro="\u8fdc\u7a0b\u63a7\u5236"', 'ro="\u8fdc\u7a0b\u63a7\u5236"'),
-    ('ro="Remote Control"', 'ro="\u8fdc\u7a0b\u63a7\u5236"'),
-    ('co="\u5168\u90e8"', 'co="\u5168\u90e8"'),
-    ('co="All"', 'co="\u5168\u90e8"'),
-    ('const Ea="\u5df2\u5b89\u6392"', 'const Ea="\u5df2\u5b89\u6392"'),
-    ('const Ea="Scheduled"', 'const Ea="\u5df2\u5b89\u6392"'),
-    ('["active","\u6d3b\u8dc3"]', '["active","\u6d3b\u8dc3"]'),
-    ('["active","Active"]', '["active","\u6d3b\u8dc3"]'),
-    ('["archived","\u5df2\u5f52\u6863"]', '["archived","\u5df2\u5f52\u6863"]'),
-    ('["archived","Archived"]', '["archived","\u5df2\u5f52\u6863"]'),
-    ('["all","\u5168\u90e8"]', '["all","\u5168\u90e8"]'),
-    ('["all","All"]', '["all","\u5168\u90e8"]'),
-    ('["0","\u5168\u90e8"]', '["0","\u5168\u90e8"]'),
-    ('["0","All"]', '["0","\u5168\u90e8"]'),
-    ('["1","\u0031\u5929"]', '["1","1\u5929"]'),
-    ('["1","1d"]', '["1","1\u5929"]'),
-    ('["3","\u0033\u5929"]', '["3","3\u5929"]'),
-    ('["3","3d"]', '["3","3\u5929"]'),
-    ('["7","\u0037\u5929"]', '["7","7\u5929"]'),
-    ('["7","7d"]', '["7","7\u5929"]'),
-    ('["14","14\u5929"]', '["14","14\u5929"]'),
-    ('["14","14d"]', '["14","14\u5929"]'),
-    ('["30","\u0033\u0030\u5929"]', '["30","30\u5929"]'),
-    ('["30","30d"]', '["30","30\u5929"]'),
-    ('"\u65e5\u671f"', '"\u65e5\u671f"'),
-    ('"Date"', '"\u65e5\u671f"'),
-    ('"\u65e0"', '"\u65e0"'),
-    ('"None"', '"\u65e0"'),
-    ('["project","\u9879\u76ee"]', '["project","\u9879\u76ee"]'),
-    ('["project","Project"]', '["project","\u9879\u76ee"]'),
-    ('["state","\u72b6\u6001"]', '["state","\u72b6\u6001"]'),
-    ('["state","State"]', '["state","\u72b6\u6001"]'),
-    ('?"\u5168\u90e8":', '?"\u5168\u90e8":'),
-    ('?"All":', '?"\u5168\u90e8":'),
-    ('children:"\u5df2\u56fa\u5b9a"', 'children:"\u5df2\u56fa\u5b9a"'),
-    ('children:"Pinned"', 'children:"\u5df2\u56fa\u5b9a"'),
-    ('children:"\u62d6\u62fd\u56fa\u5b9a"', 'children:"\u62d6\u62fd\u56fa\u5b9a"'),
-    ('children:"Drag to pin"', 'children:"\u62d6\u62fd\u56fa\u5b9a"'),
-    ('"Drop here"', '"\u653e\u5728\u8fd9\u91cc"'),
-    ('"Let go"', '"\u677e\u5f00"'),
-    ('children:["\u67e5\u770b\u5168\u90e8"', 'children:["\u67e5\u770b\u5168\u90e8"'),
-    ('children:["View all"', 'children:["\u67e5\u770b\u5168\u90e8"'),
-    ('title:"\u5220\u9664\u8f83\u65e7\u7684\u4f1a\u8bdd\uff1f"', 'title:"\u5220\u9664\u8f83\u65e7\u7684\u4f1a\u8bdd\uff1f"'),
-    ('title:"Delete older sessions?"', 'title:"\u5220\u9664\u8f83\u65e7\u7684\u4f1a\u8bdd\uff1f"'),
-    ('children:"\u6e05\u9664\u7b5b\u9009"', 'children:"\u6e05\u9664\u7b5b\u9009"'),
-    ('children:"Clear filters"', 'children:"\u6e05\u9664\u7b5b\u9009"'),
-    ('children:"\u6240\u6709\u9879\u76ee"', 'children:"\u6240\u6709\u9879\u76ee"'),
-    ('children:"All projects"', 'children:"\u6240\u6709\u9879\u76ee"'),
-    ('children:"\u5f00\u53d1\u9762\u677f"', 'children:"\u5f00\u53d1\u9762\u677f"'),
-    ('children:"Dev panels"', 'children:"\u5f00\u53d1\u9762\u677f"'),
-    ('children:"\u4e3b\u9898"', 'children:"\u4e3b\u9898"'),
-    ('children:"Theme"', 'children:"\u4e3b\u9898"'),
-    ('children:"\u5b57\u4f53"', 'children:"\u5b57\u4f53"'),
-    ('children:"Font"', 'children:"\u5b57\u4f53"'),
-    ('children:"\u9879\u76ee"', 'children:"\u9879\u76ee"'),
-    ('children:"Project"', 'children:"\u9879\u76ee"'),
-    ('const Co="\u6700\u8fd1"', 'const Co="\u6700\u8fd1"'),
-    ('const Co="Recents"', 'const Co="\u6700\u8fd1"'),
-    ('label:"\u6700\u8fd1\u6d3b\u52a8"', 'label:"\u6700\u8fd1\u6d3b\u52a8"'),
-    ('label:"Last activity"', 'label:"\u6700\u8fd1\u6d3b\u52a8"'),
-    ('label:"\u5206\u7ec4\u65b9\u5f0f"', 'label:"\u5206\u7ec4\u65b9\u5f0f"'),
-    ('label:"Group by"', 'label:"\u5206\u7ec4\u65b9\u5f0f"'),
-    ('"Stale after"', '"\u8fc7\u671f\u65f6\u95f4"'),
-    ('"Older"', '"\u66f4\u65e9"'),
-    ('"Ungrouped"', '"\u672a\u5206\u7ec4"'),
+# === Sidebar navigation (cbc59a8af-*.js) — use glob pattern ===
+PATCHES["cbc59a8af-*.js"] = [
+    ('label:"Chat"', 'label:"聊天"'),
+    ('label:"Cowork"', 'label:"协作"'),
+    ('label:"Code"', 'label:"代码"'),
+    ('label:"Operon"', 'label:"实验室"'),
 ]
 
 # === Index bundle (index-BlXy9TJN.js) - use glob pattern ===
@@ -671,6 +635,22 @@ PATCHES["index-*.js"] = [
     ('title:"End this call?"', 'title:"\u7ed3\u675f\u6b64\u901a\u8bdd\uff1f"'),
     ('title:"\u4ee3\u7801\u6267\u884c\u4e0e\u6587\u4ef6\u521b\u5efa"', 'title:"\u4ee3\u7801\u6267\u884c\u4e0e\u6587\u4ef6\u521b\u5efa"'),
     ('title:"Code execution and file creation"', 'title:"\u4ee3\u7801\u6267\u884c\u4e0e\u6587\u4ef6\u521b\u5efa"'),
+    # Additional index translations (v1.5220.0+)
+    ('"Sign in"', '"\u767b\u5f55"'),
+    ('"Tasks"', '"\u4efb\u52a1"'),
+    ('"Chats"', '"\u804a\u5929"'),
+    ('"Request"', '"\u8bf7\u6c42"'),
+    ('"Mermaid diagram"', '"Mermaid \u56fe\u8868"'),
+    ('"Move to project"', '"\u79fb\u81f3\u9879\u76ee"'),
+    ('title:"Reconnect Claude to Google Drive"', 'title:"\u91cd\u65b0\u8fde\u63a5 Claude \u5230 Google Drive"'),
+    ('title:"New cloud environment"', 'title:"\u65b0\u5efa\u4e91\u73af\u5883"'),
+    ('title:"Update cloud environment"', 'title:"\u66f4\u65b0\u4e91\u73af\u5883"'),
+    ('title:"Error displaying content - Raw result:"', 'title:"\u663e\u793a\u5185\u5bb9\u65f6\u51fa\u9519 - \u539f\u59cb\u7ed3\u679c\uff1a"'),
+    ('title:"Files hidden in shared chats"', 'title:"\u5171\u4eab\u804a\u5929\u4e2d\u5df2\u9690\u85cf\u7684\u6587\u4ef6"'),
+    ('title:"Images hidden in shared chats"', 'title:"\u5171\u4eab\u804a\u5929\u4e2d\u5df2\u9690\u85cf\u7684\u56fe\u7247"'),
+    ('title:"Learn more about Anthropic"', 'title:"\u4e86\u89e3\u66f4\u591a\u5173\u4e8e Anthropic"'),
+    # Locale mapping for cron/date formatting
+    ('"pt-BR":"pt_BR","id-ID":"id"}', '"pt-BR":"pt_BR","id-ID":"id","zh-CN":"zh_CN"}'),
 ]
 
 
@@ -681,6 +661,14 @@ def main() -> int:
 
     if args.app_dir:
         app_dir = Path(args.app_dir)
+        # If user pointed at the AnthropicClaude root, auto-find latest app-*/ subdirectory
+        if not (app_dir / "resources").exists():
+            candidates = sorted(app_dir.glob("app-*/resources/en-US.json"), reverse=True)
+            if candidates:
+                app_dir = candidates[0].parent.parent
+                print(f"Auto-detected app version: {app_dir.name}")
+            else:
+                raise SystemExit(f"No app-*/resources/en-US.json found under {app_dir}")
     else:
         app_dir = find_claude_package()
 

@@ -22,17 +22,31 @@ import patch_chunks_zh_cn
 BACKUP_BASE = Path(os.environ["LOCALAPPDATA"]) / "Claude-zh-CN-official-backup"
 BACKUP_JSON_ONLY = BACKUP_BASE / "json-only"
 CONFIG_PATH = Path(os.environ["APPDATA"]) / "Claude-3p" / "config.json"
+_CONFIG_ALT = Path(os.environ["APPDATA"]) / "Claude" / "config.json"
+if not CONFIG_PATH.exists() and _CONFIG_ALT.exists():
+    CONFIG_PATH = _CONFIG_ALT
 FONT_KEY = "claudeZhCnFont"
 
 
 def find_claude_package() -> Path | None:
-    """Auto-detect Claude package under WindowsApps."""
+    """Auto-detect Claude package — supports both Squirrel and WindowsApps installs."""
+    # 1. Squirrel installer (AnthropicClaude in LocalAppData)
+    squirrel_base = Path(os.environ.get("LOCALAPPDATA", "")) / "AnthropicClaude"
+    if squirrel_base.exists():
+        # Newer Squirrel versions: resources directly under app-*/
+        candidates = sorted(squirrel_base.glob("app-*/resources/en-US.json"), reverse=True)
+        if candidates:
+            return candidates[0].parent.parent  # .../app-X.Y.Z
+        # Older Squirrel versions: extra app/ subdirectory
+        candidates = sorted(squirrel_base.glob("app-*/app/resources/en-US.json"), reverse=True)
+        if candidates:
+            return candidates[0].parent.parent  # .../app
+    # 2. Windows Store / MSIX (WindowsApps)
     base = Path(r"C:\Program Files\WindowsApps")
-    if not base.exists():
-        return None
-    candidates = sorted(base.glob("Claude_*_x64__*/app/resources/en-US.json"), reverse=True)
-    if candidates:
-        return candidates[0].parent.parent  # .../app
+    if base.exists():
+        candidates = sorted(base.glob("Claude_*_x64__*/app/resources/en-US.json"), reverse=True)
+        if candidates:
+            return candidates[0].parent.parent  # .../app
     return None
 
 
@@ -186,6 +200,7 @@ def cleanup_known_chunk_residue_tokens(app_resources: Path) -> int:
         ('children:"\u62d6\u62fd\u56fa\u5b9a"', 'children:"Drag to pin"'),
         ('const Co="\u6700\u8fd1"', 'const Co="Recents"'),
         ('title:"\u4ee3\u7801\u6267\u884c\u4e0e\u6587\u4ef6\u521b\u5efa"', 'title:"Code execution and file creation"'),
+        ('"pt-BR":"pt_BR","id-ID":"id","zh-CN":"zh_CN"}', '"pt-BR":"pt_BR","id-ID":"id"}'),
     ]
 
     changed_files = 0
@@ -244,6 +259,14 @@ def main() -> int:
 
     if args.app_dir:
         app_dir = Path(args.app_dir)
+        # If user pointed at the AnthropicClaude root, auto-find latest app-*/ subdirectory
+        if not (app_dir / "resources").exists():
+            candidates = sorted(app_dir.glob("app-*/resources/en-US.json"), reverse=True)
+            if candidates:
+                app_dir = candidates[0].parent.parent
+                print(f"Auto-detected app version: {app_dir.name}")
+            else:
+                raise SystemExit(f"No app-*/resources/en-US.json found under {app_dir}")
     else:
         app_dir = find_claude_package()
 

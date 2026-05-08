@@ -65,10 +65,43 @@ function Resolve-ClaudeAppPath {
     return @{ AppDir = $app; ResourcesDir = $res; PackageName = ('manual:' + $app) }
   }
 
+  # If the input is a parent dir (e.g. AnthropicClaude root), auto-find latest app-*/ subdirectory
+  if (Test-Path $app) {
+    $dirs = Get-ChildItem $app -Directory -Filter 'app-*' -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending
+    foreach ($d in $dirs) {
+      $subRes = Join-Path $d.FullName 'resources'
+      $subDesktop = Join-Path $subRes 'en-US.json'
+      if (Test-Path $subDesktop) {
+        return @{ AppDir = $d.FullName; ResourcesDir = $subRes; PackageName = $d.Name }
+      }
+    }
+  }
+
   return $null
 }
 
 function Find-ClaudePackage {
+  # 1. Squirrel installer (AnthropicClaude in LocalAppData)
+  $squirrelBase = Join-Path $env:LOCALAPPDATA 'AnthropicClaude'
+  if (Test-Path $squirrelBase) {
+    $dirs = Get-ChildItem $squirrelBase -Directory -Filter 'app-*' -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending
+    foreach ($d in $dirs) {
+      # Newer Squirrel: resources directly under app-*/
+      $res = Join-Path $d.FullName 'resources'
+      if (Test-Path (Join-Path $res 'en-US.json')) {
+        return @{ AppDir = $d.FullName; ResourcesDir = $res; PackageName = $d.Name }
+      }
+      # Older Squirrel: extra app/ subdirectory
+      $app = Join-Path $d.FullName 'app'
+      $res = Join-Path $app 'resources'
+      if (Test-Path (Join-Path $res 'en-US.json')) {
+        return @{ AppDir = $app; ResourcesDir = $res; PackageName = $d.Name }
+      }
+    }
+  }
+  # 2. Windows Store / MSIX (WindowsApps)
   $base = 'C:\Program Files\WindowsApps'
   $dirs = Get-ChildItem $base -Directory -Filter 'Claude_*_x64__*' -ErrorAction SilentlyContinue |
           Sort-Object Name -Descending
@@ -87,9 +120,9 @@ function Resolve-ClaudePackage {
   if ($detected) { return $detected }
 
   Write-Host ''
-  Write-Warn '未检测到 WindowsApps 安装。'
+  Write-Warn '未检测到 Claude Desktop 安装。'
   Write-Info '如果你使用的是解压后直接运行的 Claude，请手动输入 Claude app 目录。'
-  Write-Info '示例: D:\Claude\app'
+  Write-Info '示例: D:\Claude\app 或 C:\Users\<user>\AppData\Local\AnthropicClaude\app-1.xxxx.0\app'
   Write-Host ''
 
   while ($true) {
@@ -147,6 +180,10 @@ $resDir      = $pkg.ResourcesDir
 $pkgName     = $pkg.PackageName
 $backupRoot  = Join-Path $env:LOCALAPPDATA 'Claude-zh-CN-official-backup\json-only'
 $configPath  = Join-Path $env:APPDATA 'Claude-3p\config.json'
+if (-not (Test-Path $configPath)) {
+  $altPath = Join-Path $env:APPDATA 'Claude\config.json'
+  if (Test-Path $altPath) { $configPath = $altPath }
+}
 
 # ── 状态检测 ──────────────────────────────────────────────
 function Get-PatchStatus {
