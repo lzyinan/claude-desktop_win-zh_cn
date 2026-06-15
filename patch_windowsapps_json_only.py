@@ -62,26 +62,52 @@ def backup_file(path: Path, app_resources: Path) -> None:
         copy2_best_effort(path, dst, context="backup file")
 
 
-def copy2_best_effort(src: Path, dst: Path, *, context: str) -> bool:
-    """Copy a file and retry once after clearing the destination readonly bit."""
-    try:
-        shutil.copy2(src, dst)
-        return True
-    except PermissionError:
-        if dst.exists():
-            try:
-                dst.chmod(dst.stat().st_mode | stat.S_IWRITE)
-            except OSError:
-                pass
+def copy2_best_effort(src: Path, dst: Path, *, context: str, max_retries: int = 3) -> bool:
+    """Copy a file with multiple retries for Windows permission issues."""
+    import time
+
+    last_error = None
+    for attempt in range(max_retries):
         try:
             shutil.copy2(src, dst)
             return True
+        except PermissionError as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                # Clear readonly bit before retry
+                try:
+                    if dst.exists():
+                        dst.chmod(dst.stat().st_mode | stat.S_IWRITE)
+                except OSError:
+                    pass
+                # Wait a bit before retry
+                time.sleep(0.5 * (attempt + 1))
+            continue
         except OSError as e:
-            print(f"Warning: cannot copy {context} from {src} to {dst}: {e}")
-            return False
-    except OSError as e:
-        print(f"Warning: cannot copy {context} from {src} to {dst}: {e}")
-        return False
+            last_error = e
+            break
+
+    # All retries failed - provide helpful error message
+    error_msg = (
+        f"Warning: cannot copy {context} from {src} to {dst}: {last_error}\n"
+        f"  The WindowsApps directory is protected by Windows.\n"
+        f"  Possible causes:\n"
+        f"  1. Claude Desktop is currently running\n"
+        f"  2. The file is locked by another process\n"
+        f"  3. File permissions are not set correctly\n"
+        f"  4. You need to run the script as Administrator\n"
+    )
+
+    # Check if Claude is running
+    try:
+        import psutil
+        if any(p.name().lower() == "claude" for p in psutil.process_iter()):
+            error_msg += f"  Current action: Please close Claude Desktop first, then try again.\n"
+    except ImportError:
+        pass
+
+    print(error_msg)
+    return False
 
 
 def write_text_best_effort(path: Path, text: str, *, context: str) -> bool:
