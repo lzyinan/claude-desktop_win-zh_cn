@@ -20,115 +20,30 @@ import shutil
 import stat
 from pathlib import Path
 
+# Shared helpers live in best_effort_io; this module keeps `import shutil`/`stat`
+# so existing tests that mock patch_json.shutil.copy2 keep their anchor points.
+import best_effort_io
+from best_effort_io import (
+    copy2_best_effort,
+    find_claude_package,
+    resolve_config_path,
+    write_text_best_effort,
+)
+
 
 ROOT = Path(__file__).resolve().parent
 RESOURCES = ROOT / "resources"
 BACKUP_ROOT = Path(os.environ["LOCALAPPDATA"]) / "Claude-zh-CN-official-backup" / "json-only"
-CONFIG_PATH = Path(os.environ["APPDATA"]) / "Claude-3p" / "config.json"
-_CONFIG_ALT = Path(os.environ["APPDATA"]) / "Claude" / "config.json"
-if not CONFIG_PATH.exists() and _CONFIG_ALT.exists():
-    CONFIG_PATH = _CONFIG_ALT
-
-
-def find_claude_package() -> Path | None:
-    """Auto-detect Claude package — supports both Squirrel and WindowsApps installs."""
-    # 1. Squirrel installer (AnthropicClaude in LocalAppData)
-    squirrel_base = Path(os.environ.get("LOCALAPPDATA", "")) / "AnthropicClaude"
-    if squirrel_base.exists():
-        # Newer Squirrel versions: resources directly under app-*/
-        candidates = sorted(squirrel_base.glob("app-*/resources/en-US.json"), reverse=True)
-        if candidates:
-            return candidates[0].parent.parent  # .../app-X.Y.Z
-        # Older Squirrel versions: extra app/ subdirectory
-        candidates = sorted(squirrel_base.glob("app-*/app/resources/en-US.json"), reverse=True)
-        if candidates:
-            return candidates[0].parent.parent  # .../app
-    # 2. Windows Store / MSIX (WindowsApps)
-    base = Path(r"C:\Program Files\WindowsApps")
-    if base.exists():
-        candidates = sorted(base.glob("Claude_*_x64__*/app/resources/en-US.json"), reverse=True)
-        if candidates:
-            return candidates[0].parent.parent  # .../app
-    return None
+CONFIG_PATH = resolve_config_path()
 
 
 def backup_file(path: Path, app_resources: Path) -> None:
-    if not path.exists():
-        return
-    rel = path.relative_to(app_resources)
-    dst = BACKUP_ROOT / rel
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    if not dst.exists():
-        copy2_best_effort(path, dst, context="backup file")
+    """Back up a resource file under BACKUP_ROOT (relative to app_resources).
 
-
-def copy2_best_effort(src: Path, dst: Path, *, context: str, max_retries: int = 3) -> bool:
-    """Copy a file with multiple retries for Windows permission issues."""
-    import time
-
-    last_error = None
-    for attempt in range(max_retries):
-        try:
-            shutil.copy2(src, dst)
-            return True
-        except PermissionError as e:
-            last_error = e
-            if attempt < max_retries - 1:
-                # Clear readonly bit before retry
-                try:
-                    if dst.exists():
-                        dst.chmod(dst.stat().st_mode | stat.S_IWRITE)
-                except OSError:
-                    pass
-                # Wait a bit before retry
-                time.sleep(0.5 * (attempt + 1))
-            continue
-        except OSError as e:
-            last_error = e
-            break
-
-    # All retries failed - provide helpful error message
-    error_msg = (
-        f"Warning: cannot copy {context} from {src} to {dst}: {last_error}\n"
-        f"  The WindowsApps directory is protected by Windows.\n"
-        f"  Possible causes:\n"
-        f"  1. Claude Desktop is currently running\n"
-        f"  2. The file is locked by another process\n"
-        f"  3. File permissions are not set correctly\n"
-        f"  4. You need to run the script as Administrator\n"
-    )
-
-    # Check if Claude is running
-    try:
-        import psutil
-        if any(p.name().lower() == "claude" for p in psutil.process_iter()):
-            error_msg += f"  Current action: Please close Claude Desktop first, then try again.\n"
-    except ImportError:
-        pass
-
-    print(error_msg)
-    return False
-
-
-def write_text_best_effort(path: Path, text: str, *, context: str) -> bool:
-    """Write text and degrade gracefully on Windows permission issues."""
-    try:
-        path.write_text(text, encoding="utf-8")
-        return True
-    except PermissionError:
-        try:
-            path.chmod(path.stat().st_mode | stat.S_IWRITE)
-        except OSError:
-            pass
-        try:
-            path.write_text(text, encoding="utf-8")
-            return True
-        except OSError as e:
-            print(f"Warning: cannot write {context} at {path}: {e}; skipping")
-            return False
-    except OSError as e:
-        print(f"Warning: cannot write {context} at {path}: {e}; skipping")
-        return False
+    Thin wrapper around best_effort_io.backup_file preserving the historical
+    (path, app_resources) signature and module-level BACKUP_ROOT.
+    """
+    best_effort_io.backup_file(path, app_resources, backup_root=BACKUP_ROOT)
 
 
 def patch_whitelist(app_resources: Path) -> list[str]:

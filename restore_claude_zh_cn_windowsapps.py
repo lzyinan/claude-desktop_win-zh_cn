@@ -18,36 +18,20 @@ from pathlib import Path
 
 import patch_chunks_zh_cn
 
+# Shared helpers live in best_effort_io; this module keeps `import shutil`/`stat`
+# so existing tests that mock restore.shutil.copy2 keep their anchor points.
+from best_effort_io import (
+    copy2_best_effort,
+    find_claude_package,
+    resolve_config_path,
+    write_text_best_effort,
+)
+
 
 BACKUP_BASE = Path(os.environ["LOCALAPPDATA"]) / "Claude-zh-CN-official-backup"
 BACKUP_JSON_ONLY = BACKUP_BASE / "json-only"
-CONFIG_PATH = Path(os.environ["APPDATA"]) / "Claude-3p" / "config.json"
-_CONFIG_ALT = Path(os.environ["APPDATA"]) / "Claude" / "config.json"
-if not CONFIG_PATH.exists() and _CONFIG_ALT.exists():
-    CONFIG_PATH = _CONFIG_ALT
+CONFIG_PATH = resolve_config_path()
 FONT_KEY = "claudeZhCnFont"
-
-
-def find_claude_package() -> Path | None:
-    """Auto-detect Claude package — supports both Squirrel and WindowsApps installs."""
-    # 1. Squirrel installer (AnthropicClaude in LocalAppData)
-    squirrel_base = Path(os.environ.get("LOCALAPPDATA", "")) / "AnthropicClaude"
-    if squirrel_base.exists():
-        # Newer Squirrel versions: resources directly under app-*/
-        candidates = sorted(squirrel_base.glob("app-*/resources/en-US.json"), reverse=True)
-        if candidates:
-            return candidates[0].parent.parent  # .../app-X.Y.Z
-        # Older Squirrel versions: extra app/ subdirectory
-        candidates = sorted(squirrel_base.glob("app-*/app/resources/en-US.json"), reverse=True)
-        if candidates:
-            return candidates[0].parent.parent  # .../app
-    # 2. Windows Store / MSIX (WindowsApps)
-    base = Path(r"C:\Program Files\WindowsApps")
-    if base.exists():
-        candidates = sorted(base.glob("Claude_*_x64__*/app/resources/en-US.json"), reverse=True)
-        if candidates:
-            return candidates[0].parent.parent  # .../app
-    return None
 
 
 def restore_from(backup_root: Path, app_resources: Path) -> int:
@@ -62,69 +46,6 @@ def restore_from(backup_root: Path, app_resources: Path) -> int:
         if copy2_best_effort(src, dst, context="restore backup"):
             restored += 1
     return restored
-
-
-def copy2_best_effort(src: Path, dst: Path, *, context: str, max_retries: int = 3) -> bool:
-    """Copy a file with multiple retries for Windows permission issues."""
-    import time
-
-    last_error = None
-    for attempt in range(max_retries):
-        try:
-            shutil.copy2(src, dst)
-            return True
-        except PermissionError as e:
-            last_error = e
-            if attempt < max_retries - 1:
-                # Clear readonly bit before retry
-                try:
-                    if dst.exists():
-                        dst.chmod(dst.stat().st_mode | stat.S_IWRITE)
-                except OSError:
-                    pass
-                # Wait a bit before retry
-                time.sleep(0.5 * (attempt + 1))
-            continue
-        except OSError as e:
-            last_error = e
-            break
-
-    # All retries failed - provide helpful error message
-    error_msg = (
-        f"Warning: cannot copy {context} from {src} to {dst}: {last_error}; skipping"
-    )
-
-    # Check if Claude is running
-    try:
-        import psutil
-        if any(p.name().lower() == "claude" for p in psutil.process_iter()):
-            error_msg += f"  Note: Claude Desktop is running. Please close it first."
-    except ImportError:
-        pass
-
-    print(error_msg)
-    return False
-
-
-def write_text_best_effort(path: Path, text: str, *, context: str) -> bool:
-    """Write text and degrade gracefully on Windows permission issues."""
-    try:
-        path.write_text(text, encoding="utf-8")
-        return True
-    except PermissionError:
-        try:
-            path.chmod(path.stat().st_mode | stat.S_IWRITE)
-        except OSError:
-            pass
-        try:
-            path.write_text(text, encoding="utf-8")
-            return True
-        except OSError as e:
-            print(f"Warning: cannot write {context} at {path}: {e}; skipping")
-            return False
-    except OSError as e:
-        print(f"Warning: cannot write {context} at {path}: {e}; skipping")
-        return False
 
 
 def remove_zh_cn_artifacts(app_resources: Path) -> tuple[int, int]:
